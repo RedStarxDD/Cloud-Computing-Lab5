@@ -11,17 +11,21 @@ HOST = "aws-1-sa-east-1.pooler.supabase.com" #os.getenv("host")
 PORT = "6543" #os.getenv("port")
 DBNAME = "postgres" #os.getenv("dbname")
 
-# Configuración de la página
-st.set_page_config(page_title="Predictor de Iris", page_icon="🌸")
-# Connect to the database
-try:
-    connection = psycopg2.connect(
+@st.cache_resource
+def get_connection():
+    return psycopg2.connect(
         user=USER,
         password=PASSWORD,
         host=HOST,
         port=PORT,
         dbname=DBNAME
     )
+
+# Configuración de la página
+st.set_page_config(page_title="Predictor de Iris", page_icon="🌸")
+# Connect to the database
+try:
+    connection = get_connection()
     print("Connection successful!")
     
     # Create a cursor to execute SQL queries
@@ -39,8 +43,6 @@ try:
 except Exception as e:
     st.write(str(e))
 
-
-
 # Función para cargar los modelos
 @st.cache_resource
 def load_models():
@@ -54,6 +56,45 @@ def load_models():
         st.error("No se encontraron los archivos del modelo en la carpeta 'models/'")
         return None, None, None
 
+# Función para insertar datos
+def insert_prediction(connection, data):
+    try:
+        cursor = connection.cursor()
+        query = """
+            INSERT INTO tb_iris 
+            (longitud_sepalo, ancho_sepalo, longitud_petalo, ancho_petalo, prediccion)
+            VALUES (%s, %s, %s, %s, %s, %s);
+        """
+        cursor.execute(query, data)
+        connection.commit()
+        cursor.close()
+    except Exception as e:
+        st.error(f"Error al insertar: {e}")
+
+# Función para mostrar el historial
+def get_history(connection):
+    cursor = connection.cursor()
+
+    query = """
+        SELECT 
+            longitud_sepalo,
+            ancho_sepalo,
+            longitud_petalo,
+            ancho_petalo,
+            prediccion
+            created_at
+        FROM tb_iris
+        ORDER BY created_at DESC;
+    """
+
+    cursor.execute(query)
+    rows = cursor.fetchall()
+
+    cursor.close()
+    connection.close()
+
+    return rows
+        
 # Título
 st.title("🌸 Predictor de Especies de Iris")
 
@@ -93,3 +134,40 @@ if model is not None:
         st.write("Probabilidades:")
         for species, prob in zip(target_names, probabilities):
             st.write(f"- {species}: {prob:.1%}")
+            
+                # NUEVO: insertar en BD
+    try:
+        connection = get_connection()
+
+        insert_prediction(connection, (
+            sepal_length,
+            sepal_width,
+            petal_length,
+            petal_width,
+            predicted_species
+        ))
+
+        connection.close()
+
+    except Exception as e:
+        st.error(str(e))
+        
+    st.header("📊 Histórico de predicciones")
+
+    history = get_history(connection)
+
+    if history:
+        import pandas as pd
+
+        df = pd.DataFrame(history, columns=[
+            "Longitud del Sépalo",
+            "Ancho del Sépalo",
+            "Longitud del Pétalo",
+            "Ancho del Pétalo",
+            "Especie",
+            "Fecha"
+        ])
+
+        st.dataframe(df)
+    else:
+        st.info("No hay registros aún.")
