@@ -2,46 +2,36 @@ import streamlit as st
 import joblib
 import pickle
 import numpy as np
-
 import psycopg2
-# Fetch variables
-USER = "postgres.yhvmgdxeegmwyyalfpax" #os.getenv("user")
-PASSWORD = "b53n98nv983"# os.getenv("password")
-HOST = "aws-1-sa-east-1.pooler.supabase.com" #os.getenv("host")
-PORT = "6543" #os.getenv("port")
-DBNAME = "postgres" #os.getenv("dbname")
+import pandas as pd
 
+# Variables de conexión
+USER = "postgres.yhvmgdxeegmwyyalfpax"
+PASSWORD = "b53n98nv983"
+HOST = "aws-1-sa-east-1.pooler.supabase.com"
+PORT = "6543"
+DBNAME = "postgres"
+
+# Conexión cacheada
 @st.cache_resource
 def get_connection():
-    return psycopg2.connect(
+    conn = psycopg2.connect(
         user=USER,
         password=PASSWORD,
         host=HOST,
         port=PORT,
         dbname=DBNAME
     )
+    conn.autocommit = True
+    return conn
 
-# Configuración de la página
+# Configuración de página
 st.set_page_config(page_title="Predictor de Iris", page_icon="🌸")
-# Connect to the database
-try:
-    connection = get_connection()
-    print("Connection successful!")
-    
-    # Create a cursor to execute SQL queries
-    cursor = connection.cursor()
-    
-    # Example query
-    cursor.execute("SELECT NOW();")
-    result = cursor.fetchone()
-    print("Current Time:", result)
-    # Close the cursor and connection
-    cursor.close()
 
-except Exception as e:
-    st.write(str(e))
+# Obtener conexión UNA SOLA VEZ
+connection = get_connection()
 
-# Función para cargar los modelos
+# Cargar modelos
 @st.cache_resource
 def load_models():
     try:
@@ -51,10 +41,10 @@ def load_models():
             model_info = pickle.load(f)
         return model, scaler, model_info
     except FileNotFoundError:
-        st.error("No se encontraron los archivos del modelo en la carpeta 'models/'")
+        st.error("No se encontraron los archivos del modelo")
         return None, None, None
 
-# Función para insertar datos
+# Insertar datos
 def insert_prediction(connection, data):
     try:
         cursor = connection.cursor()
@@ -64,76 +54,64 @@ def insert_prediction(connection, data):
             VALUES (%s, %s, %s, %s, %s);
         """
         cursor.execute(query, data)
-        connection.commit()
         cursor.close()
     except Exception as e:
         st.error(f"Error al insertar: {e}")
 
-# Función para mostrar el historial
+# Obtener historial
 def get_history(connection):
-    cursor = connection.cursor()
+    try:
+        cursor = connection.cursor()
+        cursor.execute("""
+            SELECT 
+                longitud_sepalo,
+                ancho_sepalo,
+                longitud_petalo,
+                ancho_petalo,
+                prediccion,
+                created_at
+            FROM tb_iris
+            ORDER BY created_at DESC;
+        """)
+        rows = cursor.fetchall()
+        cursor.close()
+        return rows
+    except Exception as e:
+        st.error(str(e))
+        return []
 
-    query = """
-        SELECT 
-            longitud_sepalo,
-            ancho_sepalo,
-            longitud_petalo,
-            ancho_petalo,
-            prediccion,
-            created_at
-        FROM tb_iris
-        ORDER BY created_at DESC;
-    """
-
-    cursor.execute(query)
-    rows = cursor.fetchall()
-
-    cursor.close()
-
-    return rows
-        
-# Título
+# UI
 st.title("🌸 Predictor de Especies de Iris")
 
-# Cargar modelos
 model, scaler, model_info = load_models()
 
 if model is not None:
-    # Inputs
     st.header("Ingresa las características de la flor:")
-    
-    sepal_length = st.number_input("Longitud del Sépalo (cm)", min_value=0.0, max_value=10.0, value=5.0, step=0.1)
-    sepal_width = st.number_input("Ancho del Sépalo (cm)", min_value=0.0, max_value=10.0, value=3.0, step=0.1)
-    petal_length = st.number_input("Longitud del Pétalo (cm)", min_value=0.0, max_value=10.0, value=4.0, step=0.1)
-    petal_width = st.number_input("Ancho del Pétalo (cm)", min_value=0.0, max_value=10.0, value=1.0, step=0.1)
-    
-    # Botón de predicción
+
+    sepal_length = st.number_input("Longitud del Sépalo (cm)", 0.0, 10.0, 5.0, 0.1)
+    sepal_width = st.number_input("Ancho del Sépalo (cm)", 0.0, 10.0, 3.0, 0.1)
+    petal_length = st.number_input("Longitud del Pétalo (cm)", 0.0, 10.0, 4.0, 0.1)
+    petal_width = st.number_input("Ancho del Pétalo (cm)", 0.0, 10.0, 1.0, 0.1)
+
     if st.button("Predecir Especie"):
-        # Preparar datos
         features = np.array([[sepal_length, sepal_width, petal_length, petal_width]])
-        
-        # Estandarizar
         features_scaled = scaler.transform(features)
-        
-        # Predecir
+
         prediction = model.predict(features_scaled)[0]
         probabilities = model.predict_proba(features_scaled)[0]
-        
-        # Mostrar resultado
+
         target_names = model_info['target_names']
         predicted_species = target_names[prediction]
-        
+        confidence = float(max(probabilities))
+
         st.success(f"Especie predicha: **{predicted_species}**")
-        st.write(f"Confianza: **{max(probabilities):.1%}**")
-        
-        # Mostrar todas las probabilidades
+        st.write(f"Confianza: **{confidence:.1%}**")
+
         st.write("Probabilidades:")
         for species, prob in zip(target_names, probabilities):
             st.write(f"- {species}: {prob:.1%}")
-            
-    try:
-        connection = get_connection()
 
+        # Insertar en BD (CORRECTO: dentro del botón)
         insert_prediction(connection, (
             sepal_length,
             sepal_width,
@@ -142,16 +120,12 @@ if model is not None:
             predicted_species
         ))
 
-    except Exception as e:
-        st.error(str(e))
-        
+    # Historial
     st.header("📊 Histórico de predicciones")
 
     history = get_history(connection)
 
     if history:
-        import pandas as pd
-
         df = pd.DataFrame(history, columns=[
             "Longitud del Sépalo",
             "Ancho del Sépalo",
@@ -160,7 +134,6 @@ if model is not None:
             "Especie",
             "Fecha"
         ])
-
         st.dataframe(df)
     else:
         st.info("No hay registros aún.")
