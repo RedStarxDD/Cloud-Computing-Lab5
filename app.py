@@ -49,7 +49,7 @@ def insert_prediction(connection, data):
     try:
         cursor = connection.cursor()
         query = """
-            INSERT INTO tb_iris
+            INSERT INTO ml.tb_iris
             (longitud_sepalo, ancho_sepalo, longitud_petalo, ancho_petalo, prediccion)
             VALUES (%s, %s, %s, %s, %s);
         """
@@ -70,7 +70,7 @@ def get_history(connection):
                 ancho_petalo,
                 prediccion,
                 created_at
-            FROM tb_iris
+            FROM ml.tb_iris
             ORDER BY created_at DESC;
         """)
         rows = cursor.fetchall()
