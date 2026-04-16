@@ -37,8 +37,6 @@ try:
     print("Current Time:", result)
     # Close the cursor and connection
     cursor.close()
-    connection.close()
-    print("Connection closed.")
 
 except Exception as e:
     st.write(str(e))
@@ -63,7 +61,7 @@ def insert_prediction(connection, data):
         query = """
             INSERT INTO tb_iris 
             (longitud_sepalo, ancho_sepalo, longitud_petalo, ancho_petalo, prediccion)
-            VALUES (%s, %s, %s, %s, %s, %s);
+            VALUES (%s, %s, %s, %s, %s);
         """
         cursor.execute(query, data)
         connection.commit()
@@ -81,7 +79,7 @@ def get_history(connection):
             ancho_sepalo,
             longitud_petalo,
             ancho_petalo,
-            prediccion
+            prediccion,
             created_at
         FROM tb_iris
         ORDER BY created_at DESC;
@@ -91,7 +89,6 @@ def get_history(connection):
     rows = cursor.fetchall()
 
     cursor.close()
-    connection.close()
 
     return rows
         
@@ -135,7 +132,6 @@ if model is not None:
         for species, prob in zip(target_names, probabilities):
             st.write(f"- {species}: {prob:.1%}")
             
-                # NUEVO: insertar en BD
     try:
         connection = get_connection()
 
@@ -146,8 +142,6 @@ if model is not None:
             petal_width,
             predicted_species
         ))
-
-        connection.close()
 
     except Exception as e:
         st.error(str(e))
